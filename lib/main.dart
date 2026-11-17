@@ -12,11 +12,8 @@ void main() {
 const String apiUrl =
     'https://delicate-firefly-96f4football-ai-pro-api.lankoandehamadou79.workers.dev';
 
-// Fonctions pour lire les données JSON sans provoquer d'erreur.
 Map<String, dynamic> asMap(dynamic value) {
-  if (value is Map) {
-    return Map<String, dynamic>.from(value);
-  }
+  if (value is Map) return Map<String, dynamic>.from(value);
   return <String, dynamic>{};
 }
 
@@ -29,7 +26,6 @@ dynamic firstValue(Map<String, dynamic> map, List<String> keys) {
 
 List<dynamic> extractMatches(dynamic data) {
   if (data is List) return data;
-
   final root = asMap(data);
 
   for (final key in [
@@ -39,34 +35,14 @@ List<dynamic> extractMatches(dynamic data) {
     'matchs',
     'fixtures',
   ]) {
-    if (root[key] is List) {
-      return root[key] as List<dynamic>;
-    }
+    if (root[key] is List) return root[key] as List<dynamic>;
   }
 
-  for (final key in ['data', 'result', 'results']) {
-    final nested = asMap(root[key]);
-
-    for (final nestedKey in [
-      'response',
-      'matches',
-      'matchs',
-      'fixtures',
-      'items',
-    ]) {
-      if (nested[nestedKey] is List) {
-        return nested[nestedKey] as List<dynamic>;
-      }
-    }
-  }
-
-  return <dynamic>[];
+  return [];
 }
 
 String displayValue(dynamic value, String fallback) {
-  if (value == null || value.toString().isEmpty) {
-    return fallback;
-  }
+  if (value == null || value.toString().isEmpty) return fallback;
   return value.toString();
 }
 
@@ -129,18 +105,12 @@ class _HomePageState extends State<HomePage> {
           .getUrl(Uri.parse('$apiUrl/fixtures/live'))
           .timeout(const Duration(seconds: 20));
 
-      request.headers.set(
-        HttpHeaders.acceptHeader,
-        'application/json',
-      );
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
 
       final response =
           await request.close().timeout(const Duration(seconds: 20));
 
-      final body = await response
-          .transform(utf8.decoder)
-          .join()
-          .timeout(const Duration(seconds: 20));
+      final body = await response.transform(utf8.decoder).join();
 
       if (response.statusCode != 200) {
         throw Exception('Erreur serveur : ${response.statusCode}');
@@ -153,18 +123,8 @@ class _HomePageState extends State<HomePage> {
 
       if (result.isEmpty) {
         final root = asMap(data);
-        final count = root['results'];
-
-        if (count != null && count.toString() != '0') {
-          message =
-              'Le serveur annonce $count rencontres, mais '
-              'l’application ne trouve pas leur liste.\n\n'
-              'Clés reçues : ${root.keys.join(', ')}';
-        } else {
-          message =
-              'Aucun match en direct actuellement. '
-              'Appuie sur Actualiser pour vérifier à nouveau.';
-        }
+        message = 'Aucun match détecté. '
+            'Clés reçues : ${root.keys.join(', ')}';
       }
 
       if (!mounted) return;
@@ -176,20 +136,13 @@ class _HomePageState extends State<HomePage> {
       });
     } catch (e) {
       if (!mounted) return;
-
       setState(() {
-        errorMessage =
-            'Impossible de récupérer les matchs. '
+        errorMessage = 'Impossible de récupérer les matchs. '
             'Vérifie ta connexion et réessaie.';
       });
     } finally {
       client.close(force: true);
-
-      if (mounted) {
-        setState(() {
-          loading = false;
-        });
-      }
+      if (mounted) setState(() => loading = false);
     }
   }
 
@@ -263,7 +216,6 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
-
         if (lastUpdate != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
@@ -274,12 +226,9 @@ class _HomePageState extends State<HomePage> {
               style: const TextStyle(color: Colors.white60),
             ),
           ),
-
         if (loading && matches.isEmpty)
           const Expanded(
-            child: Center(
-              child: CircularProgressIndicator(),
-            ),
+            child: Center(child: CircularProgressIndicator()),
           )
         else if (errorMessage != null && matches.isEmpty)
           Expanded(
@@ -289,10 +238,7 @@ class _HomePageState extends State<HomePage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      errorMessage!,
-                      textAlign: TextAlign.center,
-                    ),
+                    Text(errorMessage!, textAlign: TextAlign.center),
                     const SizedBox(height: 16),
                     ElevatedButton(
                       onPressed: loadMatches,
@@ -306,12 +252,9 @@ class _HomePageState extends State<HomePage> {
         else if (matches.isEmpty)
           Expanded(
             child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  emptyMessage ?? 'Aucun match détecté.',
-                  textAlign: TextAlign.center,
-                ),
+              child: Text(
+                emptyMessage ?? 'Aucun match détecté.',
+                textAlign: TextAlign.center,
               ),
             ),
           )
@@ -328,7 +271,6 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           ),
-
         if (loading && matches.isNotEmpty)
           const LinearProgressIndicator(),
       ],
@@ -346,31 +288,114 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-class MatchCard extends StatelessWidget {
+class MatchCard extends StatefulWidget {
   final dynamic match;
 
   const MatchCard({super.key, required this.match});
 
   @override
-  Widget build(BuildContext context) {
-    final item = asMap(match);
+  State<MatchCard> createState() => _MatchCardState();
+}
 
+class _MatchCardState extends State<MatchCard> {
+  bool statsLoading = false;
+  bool statsLoaded = false;
+  String? statsError;
+  List<dynamic> statistics = [];
+
+  Future<void> loadStatistics() async {
+    if (statsLoading) return;
+
+    final item = asMap(widget.match);
     final fixture = asMap(
       firstValue(item, ['fixture', 'match']),
     );
 
+    final fixtureId = firstValue(fixture, ['id']);
+
+    if (fixtureId == null) {
+      setState(() {
+        statsError = 'Identifiant du match introuvable.';
+      });
+      return;
+    }
+
+    setState(() {
+      statsLoading = true;
+      statsError = null;
+    });
+
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20);
+
+    try {
+      final uri = Uri.parse(
+        '$apiUrl/fixtures/statistics?fixture=$fixtureId',
+      );
+
+      final request = await client.getUrl(uri);
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+
+      final response =
+          await request.close().timeout(const Duration(seconds: 20));
+
+      final body = await response.transform(utf8.decoder).join();
+
+      if (response.statusCode != 200) {
+        throw Exception('Erreur serveur ${response.statusCode}');
+      }
+
+      final data = asMap(jsonDecode(body));
+
+      if (data['errors'] is List &&
+          (data['errors'] as List).isNotEmpty) {
+        throw Exception('L’API a signalé une erreur.');
+      }
+
+      final result = data['response'];
+
+      if (result is! List || result.isEmpty) {
+        setState(() {
+          statsError =
+              'Les statistiques ne sont pas disponibles pour ce match.';
+          statsLoaded = true;
+        });
+        return;
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        statistics = result;
+        statsLoaded = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        statsError = 'Impossible de charger les statistiques. Réessaie.';
+      });
+    } finally {
+      client.close(force: true);
+      if (mounted) setState(() => statsLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final item = asMap(widget.match);
+
+    final fixture = asMap(
+      firstValue(item, ['fixture', 'match']),
+    );
     final league = asMap(
       firstValue(item, ['league', 'ligue']),
     );
-
     final teams = asMap(
       firstValue(item, ['teams', 'équipes']),
     );
-
     final goals = asMap(
       firstValue(item, ['goals', 'buts']),
     );
-
     final status = asMap(
       firstValue(fixture, ['status', 'statut']),
     );
@@ -378,7 +403,6 @@ class MatchCard extends StatelessWidget {
     final home = asMap(
       firstValue(teams, ['home', 'domicile']),
     );
-
     final away = asMap(
       firstValue(teams, ['away', 'extérieur', 'exterieur']),
     );
@@ -387,7 +411,6 @@ class MatchCard extends StatelessWidget {
       firstValue(home, ['name', 'nom']),
       'Équipe domicile',
     );
-
     final awayName = displayValue(
       firstValue(away, ['name', 'nom']),
       'Équipe extérieure',
@@ -397,22 +420,16 @@ class MatchCard extends StatelessWidget {
       firstValue(goals, ['home', 'domicile']),
       '-',
     );
-
     final awayGoals = displayValue(
       firstValue(goals, ['away', 'extérieur', 'exterieur']),
       '-',
     );
 
-    final minute = firstValue(
-      status,
-      ['elapsed', 'écoulé', 'minute'],
-    );
-
+    final minute = firstValue(status, ['elapsed', 'écoulé', 'minute']);
     final state = displayValue(
       firstValue(status, ['short', 'court', 'long']),
       'En direct',
     );
-
     final leagueName = displayValue(
       firstValue(league, ['name', 'nom']),
       'Championnat',
@@ -439,9 +456,7 @@ class MatchCard extends StatelessWidget {
                   child: Text(
                     homeName,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
                 Text(
@@ -455,24 +470,179 @@ class MatchCard extends StatelessWidget {
                   child: Text(
                     awayName,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
             Text(
-              minute != null
-                  ? '$minute min • $state'
-                  : state,
-              style: const TextStyle(
-                color: Colors.orangeAccent,
+              minute != null ? '$minute min • $state' : state,
+              style: const TextStyle(color: Colors.orangeAccent),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: statsLoading ? null : loadStatistics,
+                icon: statsLoading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.bar_chart),
+                label: Text(
+                  statsLoading
+                      ? 'Chargement...'
+                      : 'Voir les statistiques',
+                ),
               ),
             ),
+            if (statsError != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                statsError!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.orangeAccent),
+              ),
+              TextButton(
+                onPressed: loadStatistics,
+                child: const Text('Réessayer'),
+              ),
+            ],
+            if (statsLoaded && statistics.isNotEmpty)
+              StatisticsPanel(statistics: statistics),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class StatisticsPanel extends StatelessWidget {
+  final List<dynamic> statistics;
+
+  const StatisticsPanel({super.key, required this.statistics});
+
+  @override
+  Widget build(BuildContext context) {
+    final homeTeam = asMap(statistics[0]);
+    final awayTeam =
+        statistics.length > 1 ? asMap(statistics[1]) : <String, dynamic>{};
+
+    final homeStats = homeTeam['statistics'] is List
+        ? homeTeam['statistics'] as List
+        : <dynamic>[];
+
+    final awayStats = awayTeam['statistics'] is List
+        ? awayTeam['statistics'] as List
+        : <dynamic>[];
+
+    final awayValues = <String, dynamic>{};
+
+    for (final stat in awayStats) {
+      final map = asMap(stat);
+      final type = map['type'];
+      if (type != null) awayValues[type.toString()] = map['value'];
+    }
+
+    final homeName = displayValue(
+      asMap(homeTeam['team'])['name'],
+      'Équipe 1',
+    );
+    final awayName = displayValue(
+      asMap(awayTeam['team'])['name'],
+      'Équipe 2',
+    );
+
+    return Container(
+      margin: const EdgeInsets.only(top: 14),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF101820),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          const Text(
+            'STATISTIQUES DU MATCH',
+            style: TextStyle(
+              color: Colors.greenAccent,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Text(homeName, textAlign: TextAlign.center),
+              ),
+              const Text(
+                'COMPARAISON',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.white60,
+                ),
+              ),
+              Expanded(
+                child: Text(awayName, textAlign: TextAlign.center),
+              ),
+            ],
+          ),
+          const Divider(height: 20),
+          for (final stat in homeStats)
+            _statRow(
+              asMap(stat),
+              awayValues,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statRow(
+    Map<String, dynamic> stat,
+    Map<String, dynamic> awayValues,
+  ) {
+    final type = displayValue(stat['type'], 'Statistique');
+    final homeValue = displayValue(stat['value'], '-');
+    final awayValue = displayValue(awayValues[type], '-');
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 45,
+            child: Text(
+              homeValue,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.greenAccent,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              type,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12),
+            ),
+          ),
+          SizedBox(
+            width: 45,
+            child: Text(
+              awayValue,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.orangeAccent,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -522,13 +692,10 @@ class _AnalysisPageState extends State<AnalysisPage> {
 
     setState(() {
       result =
-          'Domicile : '
-          '${(pHome / total * 100).toStringAsFixed(1)} %\n'
-          'Match nul : '
-          '${(pDraw / total * 100).toStringAsFixed(1)} %\n'
-          'Extérieur : '
-          '${(pAway / total * 100).toStringAsFixed(1)} %\n\n'
-          'Ces estimations sont calculées à partir des cotes saisies. '
+          'Domicile : ${(pHome / total * 100).toStringAsFixed(1)} %\n'
+          'Match nul : ${(pDraw / total * 100).toStringAsFixed(1)} %\n'
+          'Extérieur : ${(pAway / total * 100).toStringAsFixed(1)} %\n\n'
+          'Estimations calculées à partir des cotes saisies. '
           'Ce ne sont pas des prédictions garanties.';
     });
   }
@@ -541,17 +708,12 @@ class _AnalysisPageState extends State<AnalysisPage> {
     super.dispose();
   }
 
-  Widget oddsField(
-    String label,
-    TextEditingController controller,
-  ) {
+  Widget oddsField(String label, TextEditingController controller) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
         controller: controller,
-        keyboardType: const TextInputType.numberWithOptions(
-          decimal: true,
-        ),
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
         decoration: InputDecoration(
           labelText: label,
           border: const OutlineInputBorder(),
@@ -567,10 +729,7 @@ class _AnalysisPageState extends State<AnalysisPage> {
       children: [
         const Text(
           'ANALYSE DES COTES 1X2',
-          style: TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
         const Text(
@@ -578,18 +737,9 @@ class _AnalysisPageState extends State<AnalysisPage> {
           'pour estimer les probabilités.',
         ),
         const SizedBox(height: 20),
-        oddsField(
-          'Cote 1 - Victoire domicile',
-          homeController,
-        ),
-        oddsField(
-          'Cote X - Match nul',
-          drawController,
-        ),
-        oddsField(
-          'Cote 2 - Victoire extérieur',
-          awayController,
-        ),
+        oddsField('Cote 1 - Victoire domicile', homeController),
+        oddsField('Cote X - Match nul', drawController),
+        oddsField('Cote 2 - Victoire extérieur', awayController),
         ElevatedButton(
           onPressed: calculate,
           child: const Text('Calculer les probabilités'),
@@ -602,10 +752,7 @@ class _AnalysisPageState extends State<AnalysisPage> {
               padding: const EdgeInsets.all(16),
               child: Text(
                 result,
-                style: const TextStyle(
-                  fontSize: 16,
-                  height: 1.6,
-                ),
+                style: const TextStyle(fontSize: 16, height: 1.6),
               ),
             ),
           ),
