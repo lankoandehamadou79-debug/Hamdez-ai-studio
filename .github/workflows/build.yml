@@ -21,6 +21,28 @@ jobs:
       - name: Creer les fichiers Android
         run: flutter create --platforms=android --project-name football_ai_pro --org com.hamdez .
 
+      - name: Ajouter autorisation Internet
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("android/app/src/main/AndroidManifest.xml")
+          content = path.read_text()
+          permission = '    <uses-permission android:name="android.permission.INTERNET" />'
+
+          if permission not in content:
+              content, count = re.subn(
+                  r'(<manifest\b[^>]*>)',
+                  r'\1\n' + permission,
+                  content,
+                  count=1
+              )
+              if count == 0:
+                  raise Exception("Balise manifest introuvable")
+              path.write_text(content)
+          PY
+
       - name: Installer les dependances
         run: flutter pub get
 
