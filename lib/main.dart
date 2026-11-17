@@ -12,6 +12,64 @@ void main() {
 const String apiUrl =
     'https://delicate-firefly-96f4football-ai-pro-api.lankoandehamadou79.workers.dev';
 
+// Fonctions pour lire les données JSON sans provoquer d'erreur.
+Map<String, dynamic> asMap(dynamic value) {
+  if (value is Map) {
+    return Map<String, dynamic>.from(value);
+  }
+  return <String, dynamic>{};
+}
+
+dynamic firstValue(Map<String, dynamic> map, List<String> keys) {
+  for (final key in keys) {
+    if (map[key] != null) return map[key];
+  }
+  return null;
+}
+
+List<dynamic> extractMatches(dynamic data) {
+  if (data is List) return data;
+
+  final root = asMap(data);
+
+  for (final key in [
+    'response',
+    'réponse',
+    'matches',
+    'matchs',
+    'fixtures',
+  ]) {
+    if (root[key] is List) {
+      return root[key] as List<dynamic>;
+    }
+  }
+
+  for (final key in ['data', 'result', 'results']) {
+    final nested = asMap(root[key]);
+
+    for (final nestedKey in [
+      'response',
+      'matches',
+      'matchs',
+      'fixtures',
+      'items',
+    ]) {
+      if (nested[nestedKey] is List) {
+        return nested[nestedKey] as List<dynamic>;
+      }
+    }
+  }
+
+  return <dynamic>[];
+}
+
+String displayValue(dynamic value, String fallback) {
+  if (value == null || value.toString().isEmpty) {
+    return fallback;
+  }
+  return value.toString();
+}
+
 class FootballAIPro extends StatelessWidget {
   const FootballAIPro({super.key});
 
@@ -46,6 +104,7 @@ class _HomePageState extends State<HomePage> {
   List<dynamic> matches = [];
   bool loading = false;
   String? errorMessage;
+  String? emptyMessage;
   DateTime? lastUpdate;
 
   @override
@@ -55,43 +114,77 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> loadMatches() async {
+    if (loading) return;
+
     setState(() {
       loading = true;
       errorMessage = null;
     });
 
-    final client = HttpClient();
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20);
 
     try {
       final request = await client
           .getUrl(Uri.parse('$apiUrl/fixtures/live'))
           .timeout(const Duration(seconds: 20));
 
+      request.headers.set(
+        HttpHeaders.acceptHeader,
+        'application/json',
+      );
+
       final response =
           await request.close().timeout(const Duration(seconds: 20));
 
-      final body = await response.transform(utf8.decoder).join();
+      final body = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: 20));
 
       if (response.statusCode != 200) {
         throw Exception('Erreur serveur : ${response.statusCode}');
       }
 
       final data = jsonDecode(body);
-      final List<dynamic> result = data['response'] ?? [];
+      final result = extractMatches(data);
+
+      String? message;
+
+      if (result.isEmpty) {
+        final root = asMap(data);
+        final count = root['results'];
+
+        if (count != null && count.toString() != '0') {
+          message =
+              'Le serveur annonce $count rencontres, mais '
+              'l’application ne trouve pas leur liste.\n\n'
+              'Clés reçues : ${root.keys.join(', ')}';
+        } else {
+          message =
+              'Aucun match en direct actuellement. '
+              'Appuie sur Actualiser pour vérifier à nouveau.';
+        }
+      }
 
       if (!mounted) return;
 
       setState(() {
         matches = result;
+        emptyMessage = message;
         lastUpdate = DateTime.now();
       });
     } catch (e) {
       if (!mounted) return;
+
       setState(() {
-        errorMessage = 'Impossible de charger les matchs. Vérifie Internet.';
+        errorMessage =
+            'Impossible de récupérer les matchs. '
+            'Vérifie ta connexion et réessaie.';
       });
     } finally {
-      client.close();
+      client.close(force: true);
+
       if (mounted) {
         setState(() {
           loading = false;
@@ -157,6 +250,11 @@ class _HomePageState extends State<HomePage> {
                   ),
                 ),
               ),
+              if (matches.isNotEmpty)
+                Text(
+                  '${matches.length} matchs',
+                  style: const TextStyle(color: Colors.greenAccent),
+                ),
               IconButton(
                 onPressed: loading ? null : loadMatches,
                 icon: const Icon(Icons.refresh),
@@ -165,17 +263,23 @@ class _HomePageState extends State<HomePage> {
             ],
           ),
         ),
+
         if (lastUpdate != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
-              'Dernière mise à jour : ${lastUpdate!.hour.toString().padLeft(2, '0')}:${lastUpdate!.minute.toString().padLeft(2, '0')}',
+              'Dernière mise à jour : '
+              '${lastUpdate!.hour.toString().padLeft(2, '0')}:'
+              '${lastUpdate!.minute.toString().padLeft(2, '0')}',
               style: const TextStyle(color: Colors.white60),
             ),
           ),
+
         if (loading && matches.isEmpty)
           const Expanded(
-            child: Center(child: CircularProgressIndicator()),
+            child: Center(
+              child: CircularProgressIndicator(),
+            ),
           )
         else if (errorMessage != null && matches.isEmpty)
           Expanded(
@@ -185,7 +289,10 @@ class _HomePageState extends State<HomePage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(errorMessage!, textAlign: TextAlign.center),
+                    Text(
+                      errorMessage!,
+                      textAlign: TextAlign.center,
+                    ),
                     const SizedBox(height: 16),
                     ElevatedButton(
                       onPressed: loadMatches,
@@ -197,9 +304,15 @@ class _HomePageState extends State<HomePage> {
             ),
           )
         else if (matches.isEmpty)
-          const Expanded(
+          Expanded(
             child: Center(
-              child: Text('Aucun match en direct actuellement.'),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  emptyMessage ?? 'Aucun match détecté.',
+                  textAlign: TextAlign.center,
+                ),
+              ),
             ),
           )
         else
@@ -215,6 +328,7 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           ),
+
         if (loading && matches.isNotEmpty)
           const LinearProgressIndicator(),
       ],
@@ -224,7 +338,8 @@ class _HomePageState extends State<HomePage> {
   Widget historyPage() {
     return const Center(
       child: Text(
-        'L’historique des analyses sera disponible dans une prochaine version.',
+        'L’historique des analyses sera disponible '
+        'dans une prochaine version.',
         textAlign: TextAlign.center,
       ),
     );
@@ -238,18 +353,70 @@ class MatchCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fixture = match['fixture'] ?? {};
-    final teams = match['teams'] ?? {};
-    final goals = match['goals'] ?? {};
-    final league = match['league'] ?? {};
-    final status = fixture['status'] ?? {};
+    final item = asMap(match);
 
-    final home = teams['home']?['name'] ?? 'Équipe domicile';
-    final away = teams['away']?['name'] ?? 'Équipe extérieure';
-    final homeGoals = goals['home'] ?? '-';
-    final awayGoals = goals['away'] ?? '-';
-    final minute = status['elapsed'];
-    final state = status['short'] ?? '';
+    final fixture = asMap(
+      firstValue(item, ['fixture', 'match']),
+    );
+
+    final league = asMap(
+      firstValue(item, ['league', 'ligue']),
+    );
+
+    final teams = asMap(
+      firstValue(item, ['teams', 'équipes']),
+    );
+
+    final goals = asMap(
+      firstValue(item, ['goals', 'buts']),
+    );
+
+    final status = asMap(
+      firstValue(fixture, ['status', 'statut']),
+    );
+
+    final home = asMap(
+      firstValue(teams, ['home', 'domicile']),
+    );
+
+    final away = asMap(
+      firstValue(teams, ['away', 'extérieur', 'exterieur']),
+    );
+
+    final homeName = displayValue(
+      firstValue(home, ['name', 'nom']),
+      'Équipe domicile',
+    );
+
+    final awayName = displayValue(
+      firstValue(away, ['name', 'nom']),
+      'Équipe extérieure',
+    );
+
+    final homeGoals = displayValue(
+      firstValue(goals, ['home', 'domicile']),
+      '-',
+    );
+
+    final awayGoals = displayValue(
+      firstValue(goals, ['away', 'extérieur', 'exterieur']),
+      '-',
+    );
+
+    final minute = firstValue(
+      status,
+      ['elapsed', 'écoulé', 'minute'],
+    );
+
+    final state = displayValue(
+      firstValue(status, ['short', 'court', 'long']),
+      'En direct',
+    );
+
+    final leagueName = displayValue(
+      firstValue(league, ['name', 'nom']),
+      'Championnat',
+    );
 
     return Card(
       color: const Color(0xFF1B2B35),
@@ -259,7 +426,7 @@ class MatchCard extends StatelessWidget {
         child: Column(
           children: [
             Text(
-              league['name'] ?? 'Championnat',
+              leagueName,
               style: const TextStyle(
                 color: Colors.greenAccent,
                 fontSize: 12,
@@ -270,9 +437,11 @@ class MatchCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    home,
+                    homeName,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
                 Text(
@@ -284,17 +453,23 @@ class MatchCard extends StatelessWidget {
                 ),
                 Expanded(
                   child: Text(
-                    away,
+                    awayName,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
             Text(
-              minute != null ? '$minute min • $state' : state.toString(),
-              style: const TextStyle(color: Colors.orangeAccent),
+              minute != null
+                  ? '$minute min • $state'
+                  : state,
+              style: const TextStyle(
+                color: Colors.orangeAccent,
+              ),
             ),
           ],
         ),
@@ -318,9 +493,15 @@ class _AnalysisPageState extends State<AnalysisPage> {
   String result = '';
 
   void calculate() {
-    final home = double.tryParse(homeController.text);
-    final draw = double.tryParse(drawController.text);
-    final away = double.tryParse(awayController.text);
+    final home = double.tryParse(
+      homeController.text.replaceAll(',', '.'),
+    );
+    final draw = double.tryParse(
+      drawController.text.replaceAll(',', '.'),
+    );
+    final away = double.tryParse(
+      awayController.text.replaceAll(',', '.'),
+    );
 
     if (home == null ||
         draw == null ||
@@ -341,9 +522,12 @@ class _AnalysisPageState extends State<AnalysisPage> {
 
     setState(() {
       result =
-          'Domicile : ${(pHome / total * 100).toStringAsFixed(1)} %\n'
-          'Match nul : ${(pDraw / total * 100).toStringAsFixed(1)} %\n'
-          'Extérieur : ${(pAway / total * 100).toStringAsFixed(1)} %\n\n'
+          'Domicile : '
+          '${(pHome / total * 100).toStringAsFixed(1)} %\n'
+          'Match nul : '
+          '${(pDraw / total * 100).toStringAsFixed(1)} %\n'
+          'Extérieur : '
+          '${(pAway / total * 100).toStringAsFixed(1)} %\n\n'
           'Ces estimations sont calculées à partir des cotes saisies. '
           'Ce ne sont pas des prédictions garanties.';
     });
@@ -357,12 +541,17 @@ class _AnalysisPageState extends State<AnalysisPage> {
     super.dispose();
   }
 
-  Widget oddsField(String label, TextEditingController controller) {
+  Widget oddsField(
+    String label,
+    TextEditingController controller,
+  ) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
         controller: controller,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        keyboardType: const TextInputType.numberWithOptions(
+          decimal: true,
+        ),
         decoration: InputDecoration(
           labelText: label,
           border: const OutlineInputBorder(),
@@ -378,16 +567,29 @@ class _AnalysisPageState extends State<AnalysisPage> {
       children: [
         const Text(
           'ANALYSE DES COTES 1X2',
-          style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontSize: 19,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         const SizedBox(height: 8),
         const Text(
-          'Saisis les cotes affichées sur 1xBet pour estimer les probabilités.',
+          'Saisis les cotes affichées sur 1xBet '
+          'pour estimer les probabilités.',
         ),
         const SizedBox(height: 20),
-        oddsField('Cote 1 - Victoire domicile', homeController),
-        oddsField('Cote X - Match nul', drawController),
-        oddsField('Cote 2 - Victoire extérieur', awayController),
+        oddsField(
+          'Cote 1 - Victoire domicile',
+          homeController,
+        ),
+        oddsField(
+          'Cote X - Match nul',
+          drawController,
+        ),
+        oddsField(
+          'Cote 2 - Victoire extérieur',
+          awayController,
+        ),
         ElevatedButton(
           onPressed: calculate,
           child: const Text('Calculer les probabilités'),
@@ -400,7 +602,10 @@ class _AnalysisPageState extends State<AnalysisPage> {
               padding: const EdgeInsets.all(16),
               child: Text(
                 result,
-                style: const TextStyle(fontSize: 16, height: 1.6),
+                style: const TextStyle(
+                  fontSize: 16,
+                  height: 1.6,
+                ),
               ),
             ),
           ),
