@@ -1,9 +1,16 @@
 
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 void main() {
   runApp(const FootballAIPro());
 }
+
+const String apiUrl =
+    'https://delicate-firefly-96f4football-ai-pro-api.lankoandehamadou79.workers.dev';
 
 class FootballAIPro extends StatelessWidget {
   const FootballAIPro({super.key});
@@ -15,8 +22,11 @@ class FootballAIPro extends StatelessWidget {
       title: 'FOOTBALL AI PRO',
       theme: ThemeData(
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF101827),
-        colorSchemeSeed: Colors.green,
+        scaffoldBackgroundColor: const Color(0xFF101820),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.green,
+          brightness: Brightness.dark,
+        ),
         useMaterial3: true,
       ),
       home: const HomePage(),
@@ -32,116 +42,95 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  int selectedIndex = 0;
-
-  final homeTeam = TextEditingController();
-  final awayTeam = TextEditingController();
-  final odd1 = TextEditingController();
-  final oddX = TextEditingController();
-  final odd2 = TextEditingController();
-
-  double? probability1;
-  double? probabilityX;
-  double? probability2;
-  double? margin;
-
+  int selectedTab = 0;
+  List<dynamic> matches = [];
+  bool loading = false;
   String? errorMessage;
+  DateTime? lastUpdate;
 
   @override
-  void dispose() {
-    homeTeam.dispose();
-    awayTeam.dispose();
-    odd1.dispose();
-    oddX.dispose();
-    odd2.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    loadMatches();
   }
 
-  void calculate() {
-    final o1 = double.tryParse(odd1.text.replaceAll(',', '.'));
-    final ox = double.tryParse(oddX.text.replaceAll(',', '.'));
-    final o2 = double.tryParse(odd2.text.replaceAll(',', '.'));
+  Future<void> loadMatches() async {
+    setState(() {
+      loading = true;
+      errorMessage = null;
+    });
 
-    if (homeTeam.text.trim().isEmpty ||
-        awayTeam.text.trim().isEmpty ||
-        o1 == null || ox == null || o2 == null ||
-        o1 <= 1 || ox <= 1 || o2 <= 1) {
+    final client = HttpClient();
+
+    try {
+      final request = await client
+          .getUrl(Uri.parse('$apiUrl/fixtures/live'))
+          .timeout(const Duration(seconds: 20));
+
+      final response =
+          await request.close().timeout(const Duration(seconds: 20));
+
+      final body = await response.transform(utf8.decoder).join();
+
+      if (response.statusCode != 200) {
+        throw Exception('Erreur serveur : ${response.statusCode}');
+      }
+
+      final data = jsonDecode(body);
+      final List<dynamic> result = data['response'] ?? [];
+
+      if (!mounted) return;
+
       setState(() {
-        errorMessage = 'Remplis tous les champs. Chaque cote doit être supérieure à 1.';
-        probability1 = null;
+        matches = result;
+        lastUpdate = DateTime.now();
       });
-      return;
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        errorMessage = 'Impossible de charger les matchs. Vérifie Internet.';
+      });
+    } finally {
+      client.close();
+      if (mounted) {
+        setState(() {
+          loading = false;
+        });
+      }
     }
-
-    final p1 = 1 / o1;
-    final px = 1 / ox;
-    final p2 = 1 / o2;
-    final total = p1 + px + p2;
-
-    setState(() {
-      probability1 = p1 / total * 100;
-      probabilityX = px / total * 100;
-      probability2 = p2 / total * 100;
-      margin = (total - 1) * 100;
-      errorMessage = null;
-    });
-  }
-
-  void reset() {
-    homeTeam.clear();
-    awayTeam.clear();
-    odd1.clear();
-    oddX.clear();
-    odd2.clear();
-    setState(() {
-      probability1 = null;
-      probabilityX = null;
-      probability2 = null;
-      margin = null;
-      errorMessage = null;
-    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: const Color(0xFF101827),
         title: const Text(
-          'FOOTBALL AI PRO',
+          '⚽ FOOTBALL AI PRO',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        actions: const [
-          Padding(
-            padding: EdgeInsets.all(12),
-            child: Icon(Icons.sports_soccer, color: Colors.green),
-          ),
+        backgroundColor: const Color(0xFF172A22),
+      ),
+      body: IndexedStack(
+        index: selectedTab,
+        children: [
+          livePage(),
+          const AnalysisPage(),
+          historyPage(),
         ],
       ),
-      body: selectedIndex == 0
-          ? dashboard()
-          : selectedIndex == 1
-              ? matches()
-              : selectedIndex == 2
-                  ? analysis()
-                  : history(),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: selectedIndex,
+        selectedIndex: selectedTab,
         onDestinationSelected: (index) {
-          setState(() => selectedIndex = index);
+          setState(() => selectedTab = index);
         },
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.dashboard),
-            label: 'Accueil',
-          ),
-          NavigationDestination(
             icon: Icon(Icons.sports_soccer),
-            label: 'Matchs',
+            label: 'En direct',
           ),
           NavigationDestination(
-            icon: Icon(Icons.psychology),
-            label: 'Analyse IA',
+            icon: Icon(Icons.analytics),
+            label: 'Analyse',
           ),
           NavigationDestination(
             icon: Icon(Icons.history),
@@ -152,252 +141,270 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget dashboard() {
-    return ListView(
-      padding: const EdgeInsets.all(18),
+  Widget livePage() {
+    return Column(
       children: [
-        const Text(
-          'Bienvenue dans ton assistant !',
-          style: TextStyle(fontSize: 23, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 10),
-        const Text('Analyse et statistiques du football'),
-        const SizedBox(height: 25),
-        Container(
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF087F5B), Color(0xFF123D35)],
-            ),
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
             children: [
-              Icon(Icons.auto_awesome, size: 38),
-              SizedBox(height: 12),
-              Text(
-                'FOOTBALL AI PRO',
-                style: TextStyle(
-                  fontSize: 25,
-                  fontWeight: FontWeight.bold,
+              const Expanded(
+                child: Text(
+                  'MATCHS EN DIRECT',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
-              Text('Ton assistant d’analyse football.'),
+              IconButton(
+                onPressed: loading ? null : loadMatches,
+                icon: const Icon(Icons.refresh),
+                tooltip: 'Actualiser',
+              ),
             ],
           ),
         ),
-        const SizedBox(height: 25),
-        toolCard(Icons.sports_soccer, 'Matchs de football',
-            'Consulter les rencontres', 1),
-        toolCard(Icons.psychology, 'Calculateur 1xBet',
-            'Analyser les cotes et probabilités', 2),
-        toolCard(Icons.history, 'Historique',
-            'Retrouver tes analyses', 3),
-        const SizedBox(height: 15),
-        const Text(
-          'Les probabilités sont des estimations calculées à partir des cotes. Elles ne garantissent aucun résultat.',
-          style: TextStyle(color: Colors.orangeAccent),
-        ),
+        if (lastUpdate != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'Dernière mise à jour : ${lastUpdate!.hour.toString().padLeft(2, '0')}:${lastUpdate!.minute.toString().padLeft(2, '0')}',
+              style: const TextStyle(color: Colors.white60),
+            ),
+          ),
+        if (loading && matches.isEmpty)
+          const Expanded(
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (errorMessage != null && matches.isEmpty)
+          Expanded(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(errorMessage!, textAlign: TextAlign.center),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: loadMatches,
+                      child: const Text('Réessayer'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        else if (matches.isEmpty)
+          const Expanded(
+            child: Center(
+              child: Text('Aucun match en direct actuellement.'),
+            ),
+          )
+        else
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: loadMatches,
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: matches.length,
+                itemBuilder: (context, index) {
+                  return MatchCard(match: matches[index]);
+                },
+              ),
+            ),
+          ),
+        if (loading && matches.isNotEmpty)
+          const LinearProgressIndicator(),
       ],
     );
   }
 
-  Widget toolCard(
-      IconData icon, String title, String subtitle, int destination) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: ListTile(
-        leading: Icon(icon, color: Colors.green, size: 30),
-        title: Text(title),
-        subtitle: Text(subtitle),
-        trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-        onTap: () {
-          setState(() => selectedIndex = destination);
-        },
+  Widget historyPage() {
+    return const Center(
+      child: Text(
+        'L’historique des analyses sera disponible dans une prochaine version.',
+        textAlign: TextAlign.center,
       ),
     );
   }
+}
 
-  Widget matches() {
-    return const Center(
+class MatchCard extends StatelessWidget {
+  final dynamic match;
+
+  const MatchCard({super.key, required this.match});
+
+  @override
+  Widget build(BuildContext context) {
+    final fixture = match['fixture'] ?? {};
+    final teams = match['teams'] ?? {};
+    final goals = match['goals'] ?? {};
+    final league = match['league'] ?? {};
+    final status = fixture['status'] ?? {};
+
+    final home = teams['home']?['name'] ?? 'Équipe domicile';
+    final away = teams['away']?['name'] ?? 'Équipe extérieure';
+    final homeGoals = goals['home'] ?? '-';
+    final awayGoals = goals['away'] ?? '-';
+    final minute = status['elapsed'];
+    final state = status['short'] ?? '';
+
+    return Card(
+      color: const Color(0xFF1B2B35),
+      margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
-        padding: EdgeInsets.all(25),
+        padding: const EdgeInsets.all(14),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.sports_soccer, size: 65, color: Colors.green),
-            SizedBox(height: 15),
             Text(
-              'MATCHS DE FOOTBALL',
-              style: TextStyle(fontSize: 21, fontWeight: FontWeight.bold),
+              league['name'] ?? 'Championnat',
+              style: const TextStyle(
+                color: Colors.greenAccent,
+                fontSize: 12,
+              ),
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    home,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Text(
+                  '$homeGoals - $awayGoals',
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    away,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
             Text(
-              'Le calendrier des matchs et les résultats en direct seront ajoutés avec une source de données football.',
-              textAlign: TextAlign.center,
+              minute != null ? '$minute min • $state' : state.toString(),
+              style: const TextStyle(color: Colors.orangeAccent),
             ),
           ],
         ),
       ),
     );
   }
+}
 
-  Widget inputField(
-      String label, TextEditingController controller, String hint,
-      {bool number = false}) {
+class AnalysisPage extends StatefulWidget {
+  const AnalysisPage({super.key});
+
+  @override
+  State<AnalysisPage> createState() => _AnalysisPageState();
+}
+
+class _AnalysisPageState extends State<AnalysisPage> {
+  final homeController = TextEditingController();
+  final drawController = TextEditingController();
+  final awayController = TextEditingController();
+
+  String result = '';
+
+  void calculate() {
+    final home = double.tryParse(homeController.text);
+    final draw = double.tryParse(drawController.text);
+    final away = double.tryParse(awayController.text);
+
+    if (home == null ||
+        draw == null ||
+        away == null ||
+        home <= 1 ||
+        draw <= 1 ||
+        away <= 1) {
+      setState(() {
+        result = 'Entre trois cotes valides, supérieures à 1.';
+      });
+      return;
+    }
+
+    final pHome = 1 / home;
+    final pDraw = 1 / draw;
+    final pAway = 1 / away;
+    final total = pHome + pDraw + pAway;
+
+    setState(() {
+      result =
+          'Domicile : ${(pHome / total * 100).toStringAsFixed(1)} %\n'
+          'Match nul : ${(pDraw / total * 100).toStringAsFixed(1)} %\n'
+          'Extérieur : ${(pAway / total * 100).toStringAsFixed(1)} %\n\n'
+          'Ces estimations sont calculées à partir des cotes saisies. '
+          'Ce ne sont pas des prédictions garanties.';
+    });
+  }
+
+  @override
+  void dispose() {
+    homeController.dispose();
+    drawController.dispose();
+    awayController.dispose();
+    super.dispose();
+  }
+
+  Widget oddsField(String label, TextEditingController controller) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
         controller: controller,
-        keyboardType:
-            number ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
         decoration: InputDecoration(
           labelText: label,
-          hintText: hint,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          border: const OutlineInputBorder(),
         ),
       ),
     );
   }
 
-  Widget analysis() {
+  @override
+  Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(20),
       children: [
         const Text(
           'ANALYSE DES COTES 1X2',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
         const Text(
-          'Entre les équipes et les cotes affichées sur 1xBet.',
-          style: TextStyle(color: Colors.white70),
+          'Saisis les cotes affichées sur 1xBet pour estimer les probabilités.',
         ),
-        const SizedBox(height: 22),
-        inputField('Équipe à domicile', homeTeam, 'Ex : Real Madrid'),
-        inputField('Équipe à l’extérieur', awayTeam, 'Ex : Barcelone'),
-        const SizedBox(height: 8),
-        const Text(
-          'COTES 1XBET',
-          style: TextStyle(
-            color: Colors.green,
-            fontWeight: FontWeight.bold,
-          ),
+        const SizedBox(height: 20),
+        oddsField('Cote 1 - Victoire domicile', homeController),
+        oddsField('Cote X - Match nul', drawController),
+        oddsField('Cote 2 - Victoire extérieur', awayController),
+        ElevatedButton(
+          onPressed: calculate,
+          child: const Text('Calculer les probabilités'),
         ),
-        const SizedBox(height: 12),
-        inputField('1 - Victoire domicile', odd1, 'Ex : 2.10', number: true),
-        inputField('X - Match nul', oddX, 'Ex : 3.20', number: true),
-        inputField('2 - Victoire extérieur', odd2, 'Ex : 3.50', number: true),
-        const SizedBox(height: 8),
-        SizedBox(
-          height: 52,
-          child: ElevatedButton.icon(
-            onPressed: calculate,
-            icon: const Icon(Icons.psychology),
-            label: const Text('CALCULER LES PROBABILITÉS'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: reset,
-          icon: const Icon(Icons.refresh),
-          label: const Text('Effacer les données'),
-        ),
-        if (errorMessage != null) ...[
-          const SizedBox(height: 15),
-          Text(errorMessage!, style: const TextStyle(color: Colors.redAccent)),
-        ],
-        if (probability1 != null) ...[
-          const SizedBox(height: 25),
+        const SizedBox(height: 20),
+        if (result.isNotEmpty)
           Card(
-            color: const Color(0xFF1C2B3C),
+            color: const Color(0xFF1B2B35),
             child: Padding(
-              padding: const EdgeInsets.all(18),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'RÉSULTATS DE L’ANALYSE',
-                    style: TextStyle(
-                      color: Colors.greenAccent,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 15),
-                  Text('${homeTeam.text} - ${awayTeam.text}',
-                      style: const TextStyle(fontSize: 17)),
-                  const Divider(height: 25),
-                  resultRow('1 - ${homeTeam.text}', probability1!),
-                  resultRow('X - Match nul', probabilityX!),
-                  resultRow('2 - ${awayTeam.text}', probability2!),
-                  const Divider(height: 25),
-                  Text(
-                    'Marge estimée des cotes : ${margin!.toStringAsFixed(2)} %',
-                    style: const TextStyle(color: Colors.orangeAccent),
-                  ),
-                  const SizedBox(height: 15),
-                  const Text(
-                    'Ces probabilités sont normalisées à partir des trois cotes. Elles reflètent le marché, pas une prédiction indépendante de l’IA.',
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                ],
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                result,
+                style: const TextStyle(fontSize: 16, height: 1.6),
               ),
             ),
           ),
-        ],
       ],
-    );
-  }
-
-  Widget resultRow(String label, double value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(child: Text(label)),
-              Text(
-                '${value.toStringAsFixed(1)} %',
-                style: const TextStyle(
-                  color: Colors.greenAccent,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 7),
-          LinearProgressIndicator(
-            value: value / 100,
-            minHeight: 8,
-            backgroundColor: Colors.white12,
-            color: Colors.green,
-            borderRadius: BorderRadius.circular(8),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget history() {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.all(25),
-        child: Text(
-          'HISTORIQUE\n\nLa sauvegarde des analyses sera ajoutée dans une prochaine version.',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 18),
-        ),
-      ),
     );
   }
 }
